@@ -1,0 +1,5 @@
+dlib==19.24.6
+numpy==2.2.1
+opencv-python-headless==4.10.0.84
+pillow==11.1.0
+pillow_heif==0.21.0
