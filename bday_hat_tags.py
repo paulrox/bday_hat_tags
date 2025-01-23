@@ -13,7 +13,7 @@ from multiprocessing import Pool
 register_heif_opener()
 
 def process_image(args):
-    filename, output_folder, shape_predictor_path, hat_images, final_width = args
+    filename, output_folder, shape_predictor_path, hat_images, final_width, rotate = args
     try:
         # Load dlib's face detector and shape predictor
         detector = dlib.get_frontal_face_detector()
@@ -64,56 +64,59 @@ def process_image(args):
 
         # Process each detected face
         for i, face in enumerate(faces):
-            # Get facial landmarks
-            shape = predictor(image_cv, face)
-            landmarks = np.array(
-                [(shape.part(j).x, shape.part(j).y) for j in range(68)]
-            )
+            if rotate:
+                # Get facial landmarks
+                shape = predictor(image_cv, face)
+                landmarks = np.array(
+                    [(shape.part(j).x, shape.part(j).y) for j in range(68)]
+                )
 
-            # Get coordinates of the eyes
-            left_eye = landmarks[36:42].mean(axis=0)  # Average of left eye landmarks
-            right_eye = landmarks[42:48].mean(axis=0)  # Average of right eye landmarks
+                # Get coordinates of the eyes
+                left_eye = landmarks[36:42].mean(axis=0)  # Average of left eye landmarks
+                right_eye = landmarks[42:48].mean(axis=0)  # Average of right eye landmarks
 
-            # Calculate the angle to rotate the face
-            delta_x = right_eye[0] - left_eye[0]
-            delta_y = right_eye[1] - left_eye[1]
-            angle = degrees(atan2(delta_y, delta_x))  # Angle in degrees
-            (h, w) = image_cv.shape[:2]
-            rotation_matrix = cv2.getRotationMatrix2D(
-                (w // 2, h // 2), angle, 1.0
-            )
-            # Perform the rotation with adjusted bounds
-            image_cv = cv2.warpAffine(image_cv, rotation_matrix, (new_w, new_h))
-            opencv_img = np.array(image)
-            opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_RGB2BGR)
-            rot_image = cv2.warpAffine(
-                opencv_img, rotation_matrix, (new_w, new_h)
-            )
-            rot_image = cv2.cvtColor(rot_image, cv2.COLOR_BGR2RGB)
-            # Convert NumPy array to PIL Image
-            image = Image.fromarray(rot_image)
+                # Calculate the angle to rotate the face
+                delta_x = right_eye[0] - left_eye[0]
+                delta_y = right_eye[1] - left_eye[1]
+                angle = degrees(atan2(delta_y, delta_x))  # Angle in degrees
+                (h, w) = image_cv.shape[:2]
+                rotation_matrix = cv2.getRotationMatrix2D(
+                    (w // 2, h // 2), angle, 1.0
+                )
+                # Perform the rotation with adjusted bounds
+                image_cv = cv2.warpAffine(image_cv, rotation_matrix, (new_w, new_h))
+                opencv_img = np.array(image)
+                opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_RGB2BGR)
+                rot_image = cv2.warpAffine(
+                    opencv_img, rotation_matrix, (new_w, new_h)
+                )
+                rot_image = cv2.cvtColor(rot_image, cv2.COLOR_BGR2RGB)
+                # Convert NumPy array to PIL Image
+                image = Image.fromarray(rot_image)
 
-            # Compute again landmarks
-            rotated_faces = detector(image_cv)
-            if len(rotated_faces) == 0:
-                print(f"No face detected in rotated image for {filename}")
-                continue
-            rotated_face = rotated_faces[0]
-            rotated_shape = predictor(image_cv, rotated_face)
-            rotated_landmarks = np.array([(rotated_shape.part(j).x, rotated_shape.part(j).y) for j in range(68)])
+                # Compute again landmarks
+                rotated_faces = detector(image_cv)
+                if len(rotated_faces) == 0:
+                    print(f"No face detected in rotated image for {filename}")
+                    continue
+                rotated_face = rotated_faces[0]
+                shape = predictor(image_cv, rotated_face)
+            else:
+                shape = predictor(image_cv, face)
+            landmarks = list(np.array([(shape.part(j).x, shape.part(j).y) for j in range(68)]))
 
             # Include ears by extending the jawline points outward
-            extended_landmarks = list(rotated_landmarks[:17])  # Jawline points (0–16)
+            # extended_landmarks = list(rotated_landmarks[:17])  # Jawline points (0–16)
 
             # Add forehead extension
-            forehead_height = int(abs(rotated_landmarks[27][1] - rotated_landmarks[8][1]) * 0.6)
+            forehead_height = int(abs(landmarks[27][1] - landmarks[8][1]) * 0.6)
             forehead_points = [
-                (x, y - forehead_height) for (x, y) in rotated_landmarks[:17]
+                (x, y - forehead_height) for (x, y) in landmarks[:17]
             ]
-            extended_landmarks.extend(forehead_points[::-1])
+            landmarks.extend(forehead_points[::-1])
 
             # Create a convex hull
-            hull = cv2.convexHull(np.array(extended_landmarks))
+            hull = cv2.convexHull(np.array(landmarks))
 
             # Create a mask for the face
             mask = np.zeros((image.size[1], image.size[0]), dtype=np.uint8)
@@ -159,7 +162,7 @@ def process_image(args):
     except Exception as e:
         print(f"Error processing {filename}: {e}")
 
-def crop_face_with_smooth_mask(input_folder, output_folder, shape_predictor_path, hat_folder, width):
+def crop_face_with_smooth_mask(input_folder, output_folder, shape_predictor_path, hat_folder, width, rotate):
     # Load all hat images
     hat_images = [Image.open(os.path.join(hat_folder, hat)) for hat in os.listdir(hat_folder) if hat.endswith(".png")]
     if not hat_images:
@@ -171,7 +174,7 @@ def crop_face_with_smooth_mask(input_folder, output_folder, shape_predictor_path
     # List all files in the input folder
     files = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.heic'))]
 
-    args = [(file, output_folder, shape_predictor_path, hat_images, width) for file in files]
+    args = [(file, output_folder, shape_predictor_path, hat_images, width, rotate) for file in files]
 
     # Use ThreadPoolExecutor for parallel processing
     with Pool() as pool:
@@ -185,6 +188,7 @@ if __name__ == "__main__":
     parser.add_argument("input", help="Path to the folder containing the input images")
     parser.add_argument("--output", default="output", help="Path to the output folder")
     parser.add_argument("--resize-width", default=500, type=int, help="Width of the final image")
+    parser.add_argument("--rotate", action="store_true", help="Automatically rotates the faces horizontally")
     args = parser.parse_args()
     shape_predictor_path = (
         "shape_predictor_68_face_landmarks.dat"  # Path to dlib's shape predictor model
@@ -208,4 +212,4 @@ if __name__ == "__main__":
         os.remove(compressed_path)
 
     # Run the script
-    crop_face_with_smooth_mask(args.input, args.output, shape_predictor_path, hat_folder, args.resize_width)
+    crop_face_with_smooth_mask(args.input, args.output, shape_predictor_path, hat_folder, args.resize_width, args.rotate)
