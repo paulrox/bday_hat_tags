@@ -2,16 +2,20 @@ from PIL import Image
 import os
 import argparse
 
-def create_pdf_from_images(input_folder, output_pdf, rows, cols, image_width=None):
+def create_pdf_from_images(input_folder, output_pdf, rows, cols, image_width=None, repeat=1):
     # A4 dimensions in pixels at 300 DPI
     A4_WIDTH, A4_HEIGHT = 2480, 3508
 
     # Get a list of all PNG images in the folder
-    image_files = [
+    image_files_orig = [
         os.path.join(input_folder, file)
         for file in os.listdir(input_folder)
         if file.lower().endswith(".png")
     ]
+
+    image_files = image_files_orig.copy()
+    for _ in range(1, repeat):
+        image_files.extend(image_files_orig)
 
     if not image_files:
         raise ValueError("No PNG images found in the specified folder.")
@@ -80,11 +84,12 @@ if __name__ == "__main__":
     parser.add_argument("--rows", type=int, default=10, help="Number of rows per page.")
     parser.add_argument("--cols", type=int, default=5, help="Number of columns per page.")
     parser.add_argument("--image_width", type=int, default=None, help="Optional width to resize each image while maintaining the aspect ratio.")
+    parser.add_argument("--repeat", type=int, default=1, help="How many times the images shall be repeated in the PDF")
 
     args = parser.parse_args()
 
     try:
-        create_pdf_from_images(args.input_folder, args.output_pdf, args.rows, args.cols, args.image_width)
+        create_pdf_from_images(args.input_folder, args.output_pdf, args.rows, args.cols, args.image_width, args.repeat)
         print(f"PDF created successfully: {args.output_pdf}")
     except Exception as e:
         print(f"Error: {e}")
